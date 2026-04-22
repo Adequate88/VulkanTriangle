@@ -14,6 +14,9 @@
 #include <chrono>
 #include <thread>
 
+#define VMA_IMPLEMENTATION
+#include "vk_mem_alloc.h"
+
 constexpr bool bUseValidationLayers = false;
 
 VulkanEngine* loadedEngine = nullptr;
@@ -59,7 +62,11 @@ void VulkanEngine::cleanup()
         vkDestroyFence(_device, _frames[i]._renderFence, nullptr);
         vkDestroySemaphore(_device, _frames[i]._renderSemaphore, nullptr);
         vkDestroySemaphore(_device, _frames[i]._swapchainSemaphore, nullptr);
+
+        _frames[i]._deletionQueue.flush();
       }
+
+      _mainDeletionQueue.flush();
   
       destroy_swapchain();
   
@@ -78,6 +85,9 @@ void VulkanEngine::cleanup()
 void VulkanEngine::draw()
 {
   VK_CHECK(vkWaitForFences(_device, 1, &get_current_frame()._renderFence, true, 1000000000)); 
+  
+  get_current_frame()._deletionQueue.flush();
+
   VK_CHECK(vkResetFences(_device, 1, &get_current_frame()._renderFence)); 
 
   uint32_t swapchainImageIndex;
@@ -93,14 +103,7 @@ void VulkanEngine::draw()
 
   vkutil::transition_image(cmd, _swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
 
-  VkClearColorValue clearValue;
-
-  float flash = std::abs(std::sin(_frameNumber / 120.0f));
-  clearValue = { { 0.0f, 0.0f, flash, 1.0f} };
-
-  VkImageSubresourceRange clearRange = vkinit::image_subresource_range(VK_IMAGE_ASPECT_COLOR_BIT);
-
-  vkCmdClearColorImage(cmd, _swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_GENERAL, &clearValue, 1, &clearRange);
+  draw_background(cmd);
 
   vkutil::transition_image(cmd, _swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
@@ -129,6 +132,17 @@ void VulkanEngine::draw()
   VK_CHECK(vkQueuePresentKHR(_graphicsQueue, &presentInfo));
 
   _frameNumber++;
+}
+
+void VulkanEngine::draw_background(VkCommandBuffer cmd) 
+{
+  VkClearColorValue clearValue;
+
+  float flash = std::abs(std::sin(_frameNumber / 120.0f));                                                                
+  clearValue = { { 0.0f, 0.0f, flash, 1.0f} };                                                                            
+
+  VkImageSubresourceRange clearRange = vkinit::image_subresource_range(VK_IMAGE_ASPECT_COLOR_BIT);                        
+  vkCmdClearColorImage(cmd, _drawImage.image, VK_IMAGE_LAYOUT_GENERAL, &clearValue, 1, &clearRange); 
 }
 
 void VulkanEngine::run()
@@ -207,6 +221,17 @@ void VulkanEngine::init_vulkan(){
 
   _graphicsQueue = vkbDevice.get_queue(vkb::QueueType::graphics).value();
   _graphicsQueueFamily = vkbDevice.get_queue_index(vkb::QueueType::graphics).value();
+
+  VmaAllocatorCreateInfo allocatorInfo = {};
+  allocatorInfo.physicalDevice = _chosenGPU;
+  allocatorInfo.device = _device;
+  allocatorInfo.instance = _instance;
+  allocatorInfo.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
+
+  _mainDeletionQueue.push_function([&]() {
+    vmaDestroyAllocator(_allocator);
+  });
+
 }
 
 void VulkanEngine::create_swapchain(uint32_t width, uint32_t height){
@@ -231,6 +256,36 @@ void VulkanEngine::create_swapchain(uint32_t width, uint32_t height){
 
 void VulkanEngine::init_swapchain(){
   create_swapchain(_windowExtent.width, _windowExtent.height);
+
+  VkExtent3D drawImageExtent {_windowExtent.width, _windowExtent.height, 1};
+  
+  _drawImage.imageFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
+  _drawImage.imageExtent = drawImageExtent;
+
+  VkImageUsageFlags drawImageUsages{};
+
+  drawImageUsages |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+  drawImageUsages |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+  drawImageUsages |= VK_IMAGE_USAGE_STORAGE_BIT;
+  drawImageUsages |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+
+  VkImageCreateInfo rimg_info = vkinit::image_create_info(_drawImage.imageFormat, drawImageUsages, drawImageExtent);
+
+  VmaAllocationCreateInfo rimg_allocinfo {};
+  rimg_allocinfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+  rimg_allocinfo.requiredFlags = VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+  vmaCreateImage(_allocator, &rimg_info, &rimg_allocinfo, &_drawImage.image, &_drawImage.allocation, nullptr);
+
+  VkImageViewCreateInfo rview_info = vkinit::imageview_create_info(_drawImage.imageFormat, _drawImage.image, VK_IMAGE_ASPECT_COLOR_BIT);
+
+  VK_CHECK(vkCreateImageView(_device, &rview_info, nullptr, &_drawImage.imageView));
+
+  _mainDeletionQueue.push_function([&](){
+    vkDestroyImageView(_device, _drawImage.imageView, nullptr);
+    vmaDestroyImage(_allocator, _drawImage.image, _drawImage.allocation);
+  });
+
 }
 
 void VulkanEngine::destroy_swapchain(){
