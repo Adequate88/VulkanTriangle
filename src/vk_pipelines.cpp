@@ -99,3 +99,69 @@ void PipelineBuilder::clear()
 
   _shaderStages.clear();
 }
+
+void PipelineBuilder::set_shaders(VkShaderModule vertexShader, VkShaderModule fragmentShader)
+{
+  _shaderStages.clear();
+
+  _shaderStages.push_back(vkinit::pipeline_shader_stage_create_info(VK_SHADER_STAGE_VERTEX_BIT, vertexShader));
+  _shaderStages.push_back(vkinit::pipeline_shader_stage_create_info(VK_SHADER_STAGE_FRAGMENT_BIT, fragmentShader));
+}
+
+void PipelineBuilder::set_input_topology(VkPrimitiveTopology topology)
+{
+  _inputAssembly.topology = topology;
+  _inputAssembly.primitiveRestartEnable = VK_FALSE;
+}
+
+void PipelineBuilder::set_polygon_mode(VkPolygonMode mode)
+{
+  _rasterizer.polygonMode = mode;
+  _rasterizer.lineWidth = 1.f;
+}
+
+void PipelineBuilder::set_cull_mode(VkCullModeFlags cullMode, VkFrontFace frontFace)
+{
+  _rasterizer.cullMode = cullMode;
+  _rasterizer.frontFace = frontFace;
+}
+
+void PipelineBuilder::set_multisampling_none()
+{
+  _multiSampling.sampleShadingEnable = VK_FALSE;
+  _multiSampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+  _multiSampling.minSampleShading = 1.0f;
+  _multiSampling.pSampleMask = nullptr;
+  _multiSampling.alphaToCoverageEnable = VK_FALSE;
+  _multiSampling.alphaToOneEnable = VK_FALSE;
+}
+
+void PipelineBuilder::disable_blending()
+{
+  _colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+  _colorBlendAttachment.blendEnable = VK_FALSE;
+}
+
+void PipelineBuilder::set_color_attachment_format(VkFormat format){
+  _colorAttachmentFormat = format;
+  _renderInfo.colorAttachmentCount = 1;
+  _renderInfo.pColorAttachmentFormats = &_colorAttachmentFormat;
+}
+
+void PipelineBuilder::set_depth_format(VkFormat format)
+{
+  _renderInfo.depthAttachmentFormat = format;
+}
+
+void PipelineBuilder::disable_depthtest()
+{
+  _depthStencil.depthTestEnable = VK_FALSE;
+  _depthStencil.depthWriteEnable = VK_FALSE;
+  _depthStencil.depthCompareOp = VK_COMPARE_OP_NEVER;
+  _depthStencil.depthBoundsTestEnable = VK_FALSE;
+  _depthStencil.stencilTestEnable = VK_FALSE;
+  _depthStencil.front = {};
+  _depthStencil.back = {};
+  _depthStencil.minDepthBounds = 0.0f;
+  _depthStencil.maxDepthBounds = 1.0f;
+}
